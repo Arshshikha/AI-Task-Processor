@@ -1,0 +1,123 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  lint:
+    name: Run Lint Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Lint Backend
+        run: |
+          cd backend
+          npm ci
+          npm run lint
+
+      - name: Lint Frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run lint
+
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build and push Backend Image
+      - name: Build & Push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/ai-task-backend:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/ai-task-backend:latest
+
+      # Build and push Frontend Image
+      - name: Build & Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          build-args: |
+            VITE_API_URL=/api
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/ai-task-frontend:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/ai-task-frontend:latest
+
+      # Build and push Python Worker Image
+      - name: Build & Push Worker
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          file: ./worker/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/ai-task-worker:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/ai-task-worker:latest
+
+  update-manifests:
+    name: Update K8s Image Tags (GitOps)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Infrastructure Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/ai-task-infra
+          token: ${{ secrets.GH_PAT }}
+          path: infra-repo
+
+      - name: Update Manifest Image Tags
+        run: |
+          cd infra-repo
+          
+          # Replace old image tags with the new github.sha tag in K8s deployment manifests
+          sed -i 's|image: .*/ai-task-backend:.*|image: '${{ secrets.DOCKERHUB_USERNAME }}'/ai-task-backend:'${{ github.sha }}'|g' backend.yaml
+          sed -i 's|image: .*/ai-task-frontend:.*|image: '${{ secrets.DOCKERHUB_USERNAME }}'/ai-task-frontend:'${{ github.sha }}'|g' frontend.yaml
+          sed -i 's|image: .*/ai-task-worker:.*|image: '${{ secrets.DOCKERHUB_USERNAME }}'/ai-task-worker:'${{ github.sha }}'|g' worker.yaml
+
+      - name: Commit & Push Changes to Infrastructure Repository
+        run: |
+          cd infra-repo
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add backend.yaml frontend.yaml worker.yaml
+          
+          # Only commit and push if there are changes
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "chore(gitops): update image tags to ${{ github.sha }} [skip ci]"
+            git push origin main
+          else
+            echo "No changes in K8s manifests detected."
+          fi
