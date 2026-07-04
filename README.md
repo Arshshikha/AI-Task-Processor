@@ -161,6 +161,6 @@ To obtain a **Live Deployment URL** for demonstration purposes, you can deploy t
 
 ## Argo CD Dashboard Screenshot
 
-The screenshot of the Argo CD Dashboard showing successful synchronization of the application workloads can be found in the root of the repository as:
-- [argocd-dashboard.png](file:///c:/Users/arshshikha%20yadav/Documents/Assignment%20Project/argocd-dashboard.png)
+The screenshots of the Argo CD Dashboard showing successful synchronization of all application workloads can be found in the root of the repository as:
+- [Argo CD Dashboard Screenshot.pdf](file:///c:/Users/arshshikha%20yadav/Documents/Assignment%20Project/Argo%20CD%20Dashboard%20Screenshot.pdf)
 
